@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>雙人同心 (Tethered Together) - 雙人線上合作網頁遊戲</title>
+  <!-- 載入 Google 字型 -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&family=Orbitron:wght@500;800;900&family=Noto+Sans+TC:wght@400;700&display=swap" rel="stylesheet">
+  <!-- Socket.io -->
+  <script src="/socket.io/socket.io.js"></script>
+  <!-- 樣式表 -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- 背景發光粒子網格 (裝飾用) -->
+  <div class="bg-glow"></div>
+
+  <!-- 大廳畫面 (Lobby) -->
+  <div id="lobby" class="glass-panel active">
+    <h1 class="game-title">雙人同心<br><span class="subtitle">Tethered Together</span></h1>
+    <p class="description">這是一款即時雙人連線合作遊戲。你們將被一條彈性發光繩索緊緊綁在一起，必須共同躲避障礙物，並解開重重難關，攜手走向終點。</p>
+
+    <!-- 輸入姓名與主選單 -->
+    <div id="lobby-main" class="menu-section active">
+      <div class="input-group">
+        <label for="playerName">輸入您的暱稱</label>
+        <input type="text" id="playerName" maxlength="10" placeholder="例如：飛天小女警" autocomplete="off">
+      </div>
+      
+      <div class="button-row">
+        <button id="btnCreateRoom" class="btn btn-primary">創建房間</button>
+        <button id="btnShowJoin" class="btn btn-secondary">加入房間</button>
+      </div>
+    </div>
+
+    <!-- 輸入房號加入 -->
+    <div id="lobby-join" class="menu-section">
+      <div class="input-group">
+        <label for="roomCodeInput">輸入 4 位數房號</label>
+        <input type="text" id="roomCodeInput" maxlength="4" placeholder="請輸入 4 位數代碼" autocomplete="off">
+      </div>
+      
+      <div class="button-row">
+        <button id="btnJoinRoomSubmit" class="btn btn-primary">加入連線</button>
+        <button id="btnBackToMain" class="btn btn-secondary">返回</button>
+      </div>
+    </div>
+
+    <!-- 等待連線中 -->
+    <div id="lobby-waiting" class="menu-section">
+      <div class="waiting-box">
+        <div class="spinner"></div>
+        <h2>等待另一名玩家加入...</h2>
+        <div class="room-code-display">
+          房號代碼：<span id="roomCodeVal">----</span>
+        </div>
+        <p class="tip">請把這個房號分享給你的夥伴，讓他們加入！</p>
+        <button id="btnCancelWaiting" class="btn btn-danger">取消等待</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 遊戲主畫面容器 -->
+  <div id="game-container" class="game-container">
+    <!-- 頂部 HUD 資訊欄 -->
+    <div class="hud glass-panel">
+      <!-- 玩家標籤與房號 -->
+      <div class="hud-info">
+        <div class="room-indicator">房號: <span id="hudRoomCode">----</span></div>
+        <div class="player-identity" id="hudPlayerRole">您是：等待中...</div>
+      </div>
+      
+      <!-- 共享血條 -->
+      <div class="health-container">
+        <span class="health-label">共同生命</span>
+        <div class="health-bar-bg">
+          <div id="health-bar-fill" class="health-bar-fill" style="width: 100%;"></div>
+        </div>
+        <span id="health-text" class="health-text">100%</span>
+      </div>
+
+      <!-- 進度條 -->
+      <div class="progress-container">
+        <span class="progress-label">通關進度</span>
+        <div class="progress-track">
+          <div id="progress-dot-1" class="progress-dot active" data-title="起點"></div>
+          <div id="progress-dot-2" class="progress-dot" data-title="顏色干擾門"></div>
+          <div id="progress-dot-3" class="progress-dot" data-title="合作數學題"></div>
+          <div id="progress-dot-4" class="progress-dot" data-title="腦筋急轉彎"></div>
+          <div id="progress-dot-5" class="progress-dot" data-title="終點"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 關卡挑戰提示浮動面板 (在需要答題時浮現) -->
+    <div id="challenge-panel" class="challenge-panel glass-panel">
+      <div class="challenge-header">
+        <span class="challenge-tag" id="challengeTag">關卡挑戰</span>
+      </div>
+      <div class="challenge-body">
+        <p class="challenge-question" id="challengeQuestion">請協力前進！前方有障礙物...</p>
+      </div>
+    </div>
+
+    <!-- 遊戲畫布 -->
+    <canvas id="gameCanvas" width="1000" height="600"></canvas>
+    
+    <!-- 畫布底下的提示語 -->
+    <div class="canvas-tip">
+      使用 <span class="key">W</span> <span class="key">A</span> <span class="key">S</span> <span class="key">D</span> 或 <span class="key">↑</span> <span class="key">↓</span> <span class="key">←</span> <span class="key">→</span> 移動。兩人相連，請保持默契！
+    </div>
+  </div>
+
+  <!-- 任務失敗 (Game Over) 覆蓋面板 -->
+  <div id="game-over-screen" class="overlay-screen">
+    <div class="overlay-content glass-panel error-border">
+      <h2 class="neon-text-red animate-pulse">繩索斷裂！</h2>
+      <p>你們承受了太多撞擊，生命值歸零了...</p>
+      <p class="stats-text">再試一次，培養你們的默契！</p>
+      <button id="btnRestartGameOver" class="btn btn-danger">重新挑戰</button>
+    </div>
+  </div>
+
+  <!-- 成功通關 (Victory) 覆蓋面板 -->
+  <div id="victory-screen" class="overlay-screen">
+    <div class="overlay-content glass-panel success-border">
+      <h2 class="neon-text-green animate-glow">成功抵達終點！</h2>
+      <p>恭喜通關！你們展現了完美的默契與極高的智慧！</p>
+      <p class="stats-text">是否要刷新題目再次發起挑戰？</p>
+      <button id="btnRestartVictory" class="btn btn-primary">再次挑戰</button>
+    </div>
+  </div>
+
+  <!-- 夥伴中斷連線 (Disconnected) 覆蓋面板 -->
+  <div id="disconnect-screen" class="overlay-screen">
+    <div class="overlay-content glass-panel warning-border">
+      <h2 class="neon-text-orange">夥伴斷線！</h2>
+      <p id="disconnectMessage">另一名玩家中斷了連線...</p>
+      <button id="btnReturnToLobby" class="btn btn-secondary">返回大廳</button>
+    </div>
+  </div>
+
+  <!-- 錯誤提示訊息 (Toast Alert) -->
+  <div id="toast" class="toast">錯誤提示資訊</div>
+
+  <!-- 遊戲腳本 -->
+  <script src="game.js"></script>
+</body>
+</html>
