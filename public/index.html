@@ -28,6 +28,15 @@
         <label for="playerName">輸入您的暱稱</label>
         <input type="text" id="playerName" maxlength="10" placeholder="例如：飛天小女警" autocomplete="off">
       </div>
+
+      <!-- 難度選擇器 -->
+      <div class="input-group">
+        <label>選擇遊戲難度 (僅限房主)</label>
+        <div class="difficulty-selector">
+          <button type="button" id="btnDiffEasy" class="diff-btn active" data-difficulty="easy">簡單模式</button>
+          <button type="button" id="btnDiffHard" class="diff-btn" data-difficulty="hard">困難模式</button>
+        </div>
+      </div>
       
       <div class="button-row">
         <button id="btnCreateRoom" class="btn btn-primary">創建房間</button>

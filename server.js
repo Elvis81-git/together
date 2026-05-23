@@ -101,33 +101,34 @@ const MATHS = [
 // Stroop 效應干擾門題目
 const STROOPS = [
   {
-    instruction: '請通過【文字顏色】為綠色的傳送門',
+    instruction: '請選擇【文字顏色】為綠色的傳送門通過',
     doors: [
-      { text: '紅色', color: 'blue', value: 0 },
-      { text: '綠色', color: 'red', value: 1 },
-      { text: '藍色', color: 'green', value: 2 } // 顏色是綠色
+      { text: '綠色', color: 'red', value: 0 },    // 「綠色」字，紅色字體
+      { text: '紅色', color: 'green', value: 1 },  // 「紅色」字，綠色字體 (正確!)
+      { text: '綠色', color: 'yellow', value: 2 } // 「綠色」字，黃色字體
+    ],
+    correctIndex: 1
+  },
+  {
+    instruction: '請選擇【文字顏色】為紅色的傳送門通過',
+    doors: [
+      { text: '紅色', color: 'blue', value: 0 },   // 「紅色」字，藍色字體
+      { text: '綠色', color: 'red', value: 1 },    // 「綠色」字，紅色字體 (正確!)
+      { text: '紅色', color: 'green', value: 2 }  // 「紅色」字，綠色字體
+    ],
+    correctIndex: 1
+  },
+  {
+    instruction: '請選擇【文字顏色】為黃色的傳送門通過',
+    doors: [
+      { text: '黃色', color: 'green', value: 0 },  // 「黃色」字，綠色字體
+      { text: '黃色', color: 'red', value: 1 },    // 「黃色」字，紅色字體
+      { text: '紅色', color: 'yellow', value: 2 } // 「紅色」字，黃色字體 (正確!)
     ],
     correctIndex: 2
-  },
-  {
-    instruction: '請通過【文字內容】寫著紅色，且【文字顏色】不為藍色的傳送門',
-    doors: [
-      { text: '紅色', color: 'blue', value: 0 },
-      { text: '紅色', color: 'yellow', value: 1 }, // 寫著紅色，顏色是黃色 (不為藍色)
-      { text: '黃色', color: 'red', value: 2 }
-    ],
-    correctIndex: 1
-  },
-  {
-    instruction: '請通過【文字顏色】為黃色的傳送門',
-    doors: [
-      { text: '黃色', color: 'green', value: 0 },
-      { text: '綠色', color: 'yellow', value: 1 }, // 顏色是黃色
-      { text: '藍色', color: 'red', value: 2 }
-    ],
-    correctIndex: 1
   }
 ];
+
 
 // 隨機選取關卡內容
 function generateLevelChallenges() {
@@ -164,11 +165,16 @@ io.on('connection', (socket) => {
   console.log(`用戶已連線: ${socket.id}`);
 
   // 創建房間
-  socket.on('createRoom', (playerName) => {
+  socket.on('createRoom', (data) => {
+    // 支援舊版傳入字串與新版傳入物件 { playerName, difficulty }
+    const playerName = typeof data === 'object' ? data.playerName : data;
+    const difficulty = typeof data === 'object' ? data.difficulty : 'easy';
+
     const roomCode = generateRoomCode();
     rooms[roomCode] = {
       code: roomCode,
       state: 'waiting',
+      difficulty: difficulty || 'easy',
       players: [
         {
           id: socket.id,
@@ -185,7 +191,7 @@ io.on('connection', (socket) => {
 
     socket.join(roomCode);
     socket.emit('roomCreated', roomCode);
-    console.log(`房間已創建: ${roomCode}，創建者: ${playerName}`);
+    console.log(`房間已創建: ${roomCode}，創建者: ${playerName}，難度: ${difficulty}`);
   });
 
   // 加入房間
@@ -227,7 +233,8 @@ io.on('connection', (socket) => {
       players: room.players,
       challenges: room.challenges,
       health: room.health,
-      currentGate: room.currentGate
+      currentGate: room.currentGate,
+      difficulty: room.difficulty
     });
   });
 
@@ -288,7 +295,8 @@ io.on('connection', (socket) => {
         players: room.players,
         challenges: room.challenges,
         health: room.health,
-        currentGate: room.currentGate
+        currentGate: room.currentGate,
+        difficulty: room.difficulty
       });
       console.log(`房間 ${roomCode} 遊戲已重置。`);
     }

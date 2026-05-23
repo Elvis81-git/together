@@ -169,8 +169,11 @@ body {
   width: 100%;
 }
 
-.btn {
+.button-row .btn {
   flex: 1;
+}
+
+.btn {
   padding: 15px 25px;
   font-size: 1rem;
   font-weight: 700;
@@ -182,6 +185,55 @@ body {
   position: relative;
   overflow: hidden;
 }
+
+.overlay-content .btn, .waiting-box .btn {
+  width: 100%;
+  max-width: 240px;
+  margin-top: 10px;
+}
+
+/* 難度選擇器樣式 */
+.difficulty-selector {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+}
+
+.diff-btn {
+  flex: 1;
+  padding: 12px 15px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary);
+  font-family: var(--font-family);
+  font-weight: bold;
+  font-size: 0.95rem;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.diff-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.diff-btn.active[data-difficulty="easy"] {
+  background: rgba(0, 240, 255, 0.12);
+  border-color: var(--cyan-neon);
+  color: var(--cyan-neon);
+  box-shadow: 0 0 15px rgba(0, 240, 255, 0.25);
+}
+
+.diff-btn.active[data-difficulty="hard"] {
+  background: rgba(255, 59, 48, 0.12);
+  border-color: var(--red-neon);
+  color: var(--red-neon);
+  box-shadow: 0 0 15px rgba(255, 59, 48, 0.25);
+}
+
+
 
 .btn-primary {
   background: linear-gradient(135deg, var(--cyan-neon), #00a8ff);

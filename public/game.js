@@ -1,5 +1,11 @@
 // 初始化 Socket.io 連線
-const socket = io();
+if (typeof io === 'undefined') {
+  alert('【連線錯誤】無法載入 Socket.io！\n\n這通常是因為您直接雙擊打開了 index.html 檔案（網址顯示 file:///...）。\n\n請依循以下步驟：\n1. 在終端機執行 `node server.js` 啟動伺服器。\n2. 在瀏覽器網址列輸入 `http://localhost:3000` 開啟遊戲。');
+  window.socket = { on: () => {}, emit: () => {} };
+} else {
+  window.socket = io();
+}
+const socket = window.socket;
 
 // 遊戲狀態與變數
 let roomCode = null;
@@ -20,8 +26,17 @@ const MAP_HEIGHT = 600;
 const PLAYABLE_TOP = 100;
 const PLAYABLE_BOTTOM = 500;
 
-// 攝影機 X 座標
+// 攝影機 X 座標與自動滾動變數
 let camX = 0;
+let autoScrollSpeed = 0.8;
+let baseScrollSpeed = 0.8;
+let maxScrollSpeed = 3.5;
+let scrollAccel = 0.015; // 每秒速度增加量
+let offscreenDamageInterval = 45; // 幾幀判定一次落後扣血
+let offscreenDamageAmount = 10;   // 每次扣血數量
+let gameStartTime = 0;
+let showLeftEdgeWarning = false; // 是否顯示左側邊緣警告
+let edgeDamageTimer = 0; // 邊緣扣血計時器
 
 // 畫面晃動效果
 let shakeTime = 0;
@@ -135,6 +150,24 @@ function showToast(message) {
   }, 3000);
 }
 
+// 難度選擇
+let selectedDifficulty = 'easy';
+const btnDiffEasy = document.getElementById('btnDiffEasy');
+const btnDiffHard = document.getElementById('btnDiffHard');
+
+if (btnDiffEasy && btnDiffHard) {
+  btnDiffEasy.addEventListener('click', () => {
+    selectedDifficulty = 'easy';
+    btnDiffEasy.classList.add('active');
+    btnDiffHard.classList.remove('active');
+  });
+  btnDiffHard.addEventListener('click', () => {
+    selectedDifficulty = 'hard';
+    btnDiffHard.classList.add('active');
+    btnDiffEasy.classList.remove('active');
+  });
+}
+
 // 創建房間
 document.getElementById('btnCreateRoom').addEventListener('click', () => {
   const name = nameInput.value.trim();
@@ -142,7 +175,7 @@ document.getElementById('btnCreateRoom').addEventListener('click', () => {
     showToast('請輸入您的暱稱！');
     return;
   }
-  socket.emit('createRoom', name);
+  socket.emit('createRoom', { playerName: name, difficulty: selectedDifficulty });
 });
 
 // 顯示加入房間輸入框
@@ -266,6 +299,31 @@ socket.on('gameStart', (data) => {
   lobbyDiv.classList.remove('active');
   gameContainer.classList.add('active');
 
+  // 設定難度物理參數
+  const diff = data.difficulty || 'easy';
+  if (diff === 'easy') {
+    baseScrollSpeed = 0.4;
+    maxScrollSpeed = 1.8;
+    scrollAccel = 0.006;
+    offscreenDamageInterval = 60;
+    offscreenDamageAmount = 6;
+    hudRoomCode.innerText = `${roomCode} (簡單)`;
+  } else {
+    baseScrollSpeed = 0.9;
+    maxScrollSpeed = 3.5;
+    scrollAccel = 0.015;
+    offscreenDamageInterval = 40;
+    offscreenDamageAmount = 10;
+    hudRoomCode.innerText = `${roomCode} (困難)`;
+  }
+
+  // 初始化滾動計時與相機位置
+  camX = 0;
+  gameStartTime = Date.now();
+  autoScrollSpeed = baseScrollSpeed;
+  showLeftEdgeWarning = false;
+  edgeDamageTimer = 0;
+
   gameState = 'playing';
   console.log('遊戲開始！我是玩家:', myPlayerNo);
 
@@ -332,7 +390,37 @@ socket.on('gameReset', (data) => {
   initObstacles();
   challengePanel.classList.remove('active');
 
+  // 隱藏失敗與勝利遮罩面板！ (解決雙人同步重置問題)
+  document.getElementById('game-over-screen').classList.remove('active');
+  document.getElementById('victory-screen').classList.remove('active');
+
+  // 設定難度物理參數
+  const diff = data.difficulty || 'easy';
+  if (diff === 'easy') {
+    baseScrollSpeed = 0.4;
+    maxScrollSpeed = 1.8;
+    scrollAccel = 0.006;
+    offscreenDamageInterval = 60;
+    offscreenDamageAmount = 6;
+    hudRoomCode.innerText = `${roomCode} (簡單)`;
+  } else {
+    baseScrollSpeed = 0.9;
+    maxScrollSpeed = 3.5;
+    scrollAccel = 0.015;
+    offscreenDamageInterval = 40;
+    offscreenDamageAmount = 10;
+    hudRoomCode.innerText = `${roomCode} (困難)`;
+  }
+
+  // 重置滾動計時與相機位置
+  camX = 0;
+  gameStartTime = Date.now();
+  autoScrollSpeed = baseScrollSpeed;
+  showLeftEdgeWarning = false;
+  edgeDamageTimer = 0;
+
   gameState = 'playing';
+  requestAnimationFrame(gameLoop);
 });
 
 // 成功通關
@@ -489,6 +577,26 @@ function triggerScreenShake(time, intensity) {
 function updatePhysics() {
   if (!localPlayer || !peerPlayer) return;
 
+  // 0. 計算已遊玩時間與目前滾動速度
+  const elapsed = (Date.now() - gameStartTime) / 1000;
+  autoScrollSpeed = Math.min(maxScrollSpeed, baseScrollSpeed + elapsed * scrollAccel);
+
+  // 地圖自動向前推進 (不因未解鎖大門停下)
+  camX += autoScrollSpeed;
+
+  // 如果玩家走得比相機快，推動相機跟上，避免玩家跑出螢幕右側
+  const avgX = (player1.x + player2.x) / 2;
+  const minCamX = avgX - 600; // 超出相機中心偏右 (60% 寬度)
+  if (camX < minCamX) {
+    camX = minCamX;
+  }
+  
+  // 限制相機最大邊界
+  const maxCamX = MAP_WIDTH - canvas.width;
+  if (camX > maxCamX) {
+    camX = maxCamX;
+  }
+
   // 1. 本地玩家輸入物理
   if (keys.w) localPlayer.vy -= ACCEL;
   if (keys.s) localPlayer.vy += ACCEL;
@@ -541,16 +649,45 @@ function updatePhysics() {
   localPlayer.x += localPlayer.vx;
   localPlayer.y += localPlayer.vy;
 
-  // 6. 地圖邊界碰撞
-  // 左右邊界
-  if (localPlayer.x < localPlayer.radius) {
-    localPlayer.x = localPlayer.radius;
-    localPlayer.vx = 0;
-  }
+  // 6. 地圖邊界碰撞與滾動邊界推力
+  // 右邊界限制
   if (localPlayer.x > MAP_WIDTH - localPlayer.radius) {
     localPlayer.x = MAP_WIDTH - localPlayer.radius;
     localPlayer.vx = 0;
   }
+
+  // 左邊界推動限制 (不可穿過未解鎖的關卡大門)
+  let targetLeftBound = camX + localPlayer.radius;
+  const currentLockedGate = challengesData.find((gate, idx) => activeGate <= idx);
+  if (currentLockedGate && targetLeftBound > currentLockedGate.x - 15 - localPlayer.radius) {
+    // 被未解鎖的大門擋住，相機推力不能將玩家推過大門！
+    targetLeftBound = currentLockedGate.x - 15 - localPlayer.radius;
+  }
+
+  if (localPlayer.x < targetLeftBound) {
+    localPlayer.x = targetLeftBound;
+    localPlayer.vx = 0;
+  }
+
+  // 檢查玩家是否落後於螢幕左邊緣，若是則顯示警告並扣血
+  const eitherOffScreen = (player1.x < camX + player1.radius + 15) || (player2.x < camX + player2.radius + 15);
+  showLeftEdgeWarning = eitherOffScreen;
+
+  if (localPlayer.x < camX + localPlayer.radius + 15) {
+    edgeDamageTimer++;
+    // 依據難度設定的幀率間隔扣血，以防扣血過快造成玩家無防備死亡
+    if (edgeDamageTimer >= offscreenDamageInterval) {
+      edgeDamageTimer = 0;
+      socket.emit('playerHit', { roomCode, damage: offscreenDamageAmount });
+      showToast('⚠️ 警告：您已落後螢幕！持續受到電磁輻射傷害！');
+      triggerDamageSparks(localPlayer.x, localPlayer.y);
+    }
+  } else {
+    if (!eitherOffScreen) {
+      edgeDamageTimer = 0;
+    }
+  }
+
   // 上下可走區域邊界
   if (localPlayer.y < PLAYABLE_TOP + localPlayer.radius) {
     localPlayer.y = PLAYABLE_TOP + localPlayer.radius;
@@ -732,15 +869,8 @@ function updatePhysics() {
 function drawGame() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // 1. 計算攝影機位置 (相機平滑跟隨兩名玩家的中間點)
-  const avgX = (player1.x + player2.x) / 2;
-  const targetCamX = avgX - canvas.width / 2;
-  
-  // 限制攝影機邊界
-  const maxCamX = MAP_WIDTH - canvas.width;
-  const clampedTargetCamX = Math.max(0, Math.min(targetCamX, maxCamX));
-  
-  camX += (clampedTargetCamX - camX) * 0.1;
+  // 1. 攝影機位置已在物理引擎中依據滾動速度與玩家位置計算，此處直接使用
+
 
   // 處理畫面晃動
   let offsetX = 0;
@@ -780,6 +910,29 @@ function drawGame() {
   drawPlayer(player2);
 
   ctx.restore();
+
+  // 10. 繪製螢幕左邊邊緣警告特效 (在 screen space 繪製，不受 camX 偏移影響)
+  if (showLeftEdgeWarning) {
+    ctx.save();
+    // 繪製左側紅色發光漸層
+    let warningGrad = ctx.createLinearGradient(0, 0, 150, 0);
+    // 閃爍效果
+    const alpha = 0.3 + 0.2 * Math.sin(Date.now() / 120);
+    warningGrad.addColorStop(0, `rgba(255, 59, 48, ${alpha})`);
+    warningGrad.addColorStop(1, 'rgba(255, 59, 48, 0)');
+    ctx.fillStyle = warningGrad;
+    ctx.fillRect(0, PLAYABLE_TOP, 150, PLAYABLE_BOTTOM - PLAYABLE_TOP);
+
+    // 繪製「⚠️ 快跟上！」警告文字
+    ctx.fillStyle = '#ff3b30';
+    ctx.font = 'bold 22px var(--font-family)';
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = 'rgba(255, 59, 48, 0.8)';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('⚠️ 快跟上！ KEEP UP!', 40, PLAYABLE_TOP + 30);
+    ctx.restore();
+  }
 }
 
 // 繪製滾動背景格線
@@ -1097,26 +1250,9 @@ function drawGates() {
         ctx.strokeRect(gateX - doorWidth / 2, doorY + 5, doorWidth, doorHeight - 10);
       } else {
         // 未解開：呈現發光力場
-        let doorColor = '#ff3b30'; // 預設紅色防禦力場
-        let glowColor = 'rgba(255, 59, 48, 0.5)';
+        let doorColor = '#7b2cbf'; // 所有未解鎖的大門都採用統一的霓虹紫色防禦力場
+        let glowColor = 'rgba(123, 44, 191, 0.5)';
 
-        // 在 Stroop 關卡，各個門有不同字體顏色，我們就按題目指定顏色來渲染門的邊框，讓視覺極致華麗
-        if (gate.type === 'stroop') {
-          const cName = gate.doors[doorIdx].color;
-          if (cName === 'blue') {
-            doorColor = '#00f0ff';
-            glowColor = 'rgba(0, 240, 255, 0.5)';
-          } else if (cName === 'red') {
-            doorColor = '#ff3b30';
-            glowColor = 'rgba(255, 59, 48, 0.5)';
-          } else if (cName === 'green') {
-            doorColor = '#34c759';
-            glowColor = 'rgba(52, 199, 89, 0.5)';
-          } else if (cName === 'yellow') {
-            doorColor = '#ffd700';
-            glowColor = 'rgba(255, 215, 0, 0.5)';
-          }
-        }
 
         ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
         ctx.fillRect(gateX - doorWidth / 2, doorY + 5, doorWidth, doorHeight - 10);
